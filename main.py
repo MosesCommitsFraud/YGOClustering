@@ -9,6 +9,13 @@ from collections import Counter, defaultdict
 from pyvis.network import Network
 from tqdm import tqdm  # pip install tqdm
 
+# Check for Jinja2 (used by pyvis for HTML templating)
+try:
+    import jinja2
+except ImportError:
+    print("Jinja2 is not installed. Please run 'pip install Jinja2'")
+    exit(1)
+
 # Path to cache card info locally and the API URL.
 CARD_INFO_FILE = "cards.json"
 CARD_INFO_URL = "https://db.ygoprodeck.com/api/v7/cardinfo.php"
@@ -95,7 +102,6 @@ def parse_ydk_files_parallel(directory):
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = {executor.submit(process_deck_file, file): file for file in deck_files}
-        # Wrap as_completed with tqdm for progress monitoring
         for future in tqdm(concurrent.futures.as_completed(futures),
                            total=len(futures),
                            desc="Processing decks"):
@@ -123,39 +129,33 @@ def build_graph(global_freq, cooccurrence, card_dict, min_edge_weight=3):
 
 def visualize_graph(G, output_filename="card_cluster.html", max_nodes=500):
     """
-    Visualizes the graph using pyvis. If the graph has more than `max_nodes`,
-    it filters to the top `max_nodes` by node count for faster visualization.
+    Visualizes the graph using pyvis.
+    If the graph has more than `max_nodes`, it filters to the top nodes by count for faster visualization.
     """
-    # If the graph is too large, filter to the top `max_nodes`
     if len(G.nodes) > max_nodes:
         print(f"Graph has {len(G.nodes)} nodes. Filtering to top {max_nodes} nodes by count.")
-        # Sort nodes by count (attribute 'count') descending
+        # Sort nodes by count descending and keep only the top max_nodes
         top_nodes = sorted(G.nodes(data=True), key=lambda x: x[1].get("count", 0), reverse=True)[:max_nodes]
         node_set = set(node for node, data in top_nodes)
-        # Create a subgraph with these nodes
         subG = G.subgraph(node_set).copy()
     else:
         subG = G
 
-    # Initialize pyvis network
-    from pyvis.network import Network
     net = Network(height="800px", width="100%", notebook=False, bgcolor="#222222", font_color="white")
-    net.barnes_hut()  # Barnes-Hut physics for layout
+    net.barnes_hut()
 
-    # Add nodes to the visualization
     for node, data in subG.nodes(data=True):
         net.add_node(node,
                      label=data.get("label", node),
                      title=data.get("title", ""),
                      value=data.get("count", 1))
-    # Add edges
     for source, target, data in subG.edges(data=True):
         net.add_edge(source, target,
                      value=data.get("weight", 1),
                      title=data.get("title", ""))
 
-    # Save and open the visualization
-    net.show(output_filename)
+    # Force browser opening and set notebook mode to False.
+    net.show(output_filename, open_browser=True, notebook=False)
     print(f"Graph visualization saved to {output_filename}")
 
 
@@ -181,10 +181,10 @@ def main():
     card_dict = fetch_card_info()
 
     print("\n=== Parsing YDK Files in Parallel ===")
-    global_freq, deck_type_freq, deck_occurrences, cooccurrence = parse_ydk_files_parallel(YDK_DIRECTORY)
+    global_freq, deck_type_freq, deck_occurrences, total_cooccurrence = parse_ydk_files_parallel(YDK_DIRECTORY)
 
     print("\n=== Building Co-occurrence Graph ===")
-    G = build_graph(global_freq, cooccurrence, card_dict, min_edge_weight=3)
+    G = build_graph(global_freq, total_cooccurrence, card_dict, min_edge_weight=3)
 
     print("\n=== Visualizing Graph ===")
     visualize_graph(G)
